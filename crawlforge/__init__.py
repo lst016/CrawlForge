@@ -5,15 +5,42 @@ CrawlForge - AI-Driven Multi-Game Crawler Framework
 __version__ = "0.1.0"
 __author__ = "CrawlForge Team"
 
-from .orchestrator import CrawlForge
-from .adapter import GameAdapter, GameState, Action, GameData
-from .registry import AdapterRegistry
+# Import core components
+from .core.dataclasses import (
+    Action,
+    ActionType,
+    GameData,
+    GamePhase,
+    GameState,
+    SlotGameState,
+    Strategy,
+)
+from .core.exceptions import (
+    AdapterError,
+    CrawlForgeError,
+    DetectionError,
+    EvolutionError,
+    RuntimeError,
+)
+from .core.interfaces import GameAdapter, GameDetector, Runtime
 
 __all__ = [
-    "CrawlForge",
-    "GameAdapter",
-    "GameState",
+    # dataclasses
     "Action",
+    "ActionType",
     "GameData",
-    "AdapterRegistry",
+    "GamePhase",
+    "GameState",
+    "SlotGameState",
+    "Strategy",
+    # exceptions
+    "CrawlForgeError",
+    "RuntimeError",
+    "AdapterError",
+    "EvolutionError",
+    "DetectionError",
+    # interfaces
+    "GameAdapter",
+    "GameDetector",
+    "Runtime",
 ]
