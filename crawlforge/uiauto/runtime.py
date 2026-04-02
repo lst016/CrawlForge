@@ -22,7 +22,10 @@ class UIElementEncoder:
     def parse_hierarchy(xml_str: str) -> UIElement:
         """Parse uiautomator2 XML hierarchy into UIElement tree."""
         root = ET.fromstring(xml_str)
-        return UIElementEncoder._parse_node(root)
+        # Skip <hierarchy> wrapper element, parse first child
+        if root.tag == "hierarchy" and len(root) > 0:
+            return UIElementEncoder._parse_node(root[0], depth=0)
+        return UIElementEncoder._parse_node(root, depth=0)
 
     @staticmethod
     def _parse_node(node: ET.Element, depth: int = 0) -> UIElement:

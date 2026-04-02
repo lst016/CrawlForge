@@ -3,81 +3,106 @@ Tests for SlotGameDetector.
 """
 
 import pytest
-from unittest.mock import MagicMock, patch
+from crawlforge.uiauto.ui_element import UIElement
+from crawlforge.detector.slot_detector import SlotGameDetector
+from crawlforge.detector.phases import SlotPhase, SpinState, BalanceState
 
-from crawlforge.core.dataclasses import GamePhase
-from crawlforge.detectors.slot_detector import SlotGameDetector
+
+def make_hierarchy(elements):
+    root = UIElement(
+        resource_id="com.game:id/root",
+        class_name="android.widget.FrameLayout",
+        bounds=(0, 0, 1080, 2340),
+    )
+    for el_dict in elements:
+        node = UIElement(
+            resource_id=el_dict.get("resource_id", ""),
+            text=el_dict.get("text", ""),
+            content_desc=el_dict.get("content_desc", ""),
+            class_name=el_dict.get("class", "android.widget.TextView"),
+            bounds=el_dict.get("bounds", (0, 0, 100, 50)),
+            clickable=el_dict.get("clickable", False),
+            enabled=el_dict.get("enabled", True),
+        )
+        root.children.append(node)
+    return root
 
 
 class TestSlotGameDetector:
-    @pytest.fixture
-    def detector(self):
-        return SlotGameDetector()
 
-    @pytest.fixture
-    def mock_screenshot(self):
-        return b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
+    def test_detector_init(self):
+        detector = SlotGameDetector(None, "TestGame")
+        assert detector.game_name == "TestGame"
 
-    def test_init(self, detector):
-        assert detector.template_store is not None
-        assert detector._templates == {}
+    def test_extract_number_basic(self):
+        assert SlotGameDetector._extract_number("5000") == 5000
+        assert SlotGameDetector._extract_number("1,000,000") == 1000000
+        assert SlotGameDetector._extract_number("Balance: 5000 coins") == 5000
+        assert SlotGameDetector._extract_number("No numbers here") is None
+        assert SlotGameDetector._extract_number("") is None
+        assert SlotGameDetector._extract_number(None) is None
 
-    def test_detect_phase_without_cv2(self, detector, mock_screenshot):
-        with patch("crawlforge.detectors.slot_detector.CV2_AVAILABLE", False):
-            result = detector.detect_phase(mock_screenshot)
-            assert result == GamePhase.UNKNOWN
+    def test_detect_game_ready(self):
+        h = make_hierarchy([
+            {"resource_id": "com.game:id/spin_btn", "text": "SPIN", "clickable": True},
+            {"resource_id": "com.game:id/balance", "text": "Balance: 10000"},
+            {"resource_id": "com.game:id/bet", "text": "Bet: 100"},
+        ])
+        detector = SlotGameDetector(None, "TestGame")
+        result = detector.detect(h)
+        assert result.phase == SlotPhase.GAME_READY
+        assert result.ui.spin_button is not None
+        assert result.balance == 10000
 
-    def test_detect_phase_idle(self, detector, mock_screenshot):
-        with patch("crawlforge.detectors.slot_detector.CV2_AVAILABLE", True):
-            with patch("cv2.imdecode", return_value=None):
-                result = detector.detect_phase(mock_screenshot)
-                assert result == GamePhase.UNKNOWN
+    def test_detect_spinning(self):
+        h = make_hierarchy([
+            {"resource_id": "com.game:id/status", "text": "Spinning..."},
+        ])
+        detector = SlotGameDetector(None, "TestGame")
+        result = detector.detect(h)
+        assert result.phase == SlotPhase.SPINNING
 
-    def test_detect_phase_spinning(self, detector, mock_screenshot):
-        with patch("crawlforge.detectors.slot_detector.CV2_AVAILABLE", True):
-            with patch("cv2.imdecode", return_value=MagicMock()):
-                with patch("cv2.cvtColor", return_value=MagicMock()):
-                    with patch("cv2.Laplacian") as mock_lap:
-                        mock_result = MagicMock()
-                        mock_result.var.return_value = 200  # High variance = spinning
-                        mock_lap.return_value = mock_result
-                        result = detector.detect_phase(mock_screenshot)
-                        assert result == GamePhase.SPINNING
+    def test_detect_win_display(self):
+        h = make_hierarchy([
+            {"resource_id": "com.game:id/win_amount", "text": "Win: 5000"},
+            {"resource_id": "com.game:id/collect_btn", "text": "COLLECT", "clickable": True},
+        ])
+        detector = SlotGameDetector(None, "TestGame")
+        result = detector.detect(h)
+        assert result.phase == SlotPhase.WIN_DISPLAY
+        assert result.win_amount == 5000
 
-    def test_extract_balance_no_cv2(self, detector, mock_screenshot):
-        with patch("crawlforge.detectors.slot_detector.CV2_AVAILABLE", False):
-            result = detector.extract_balance(mock_screenshot)
-            assert result == 0
+    def test_detect_loading(self):
+        h = make_hierarchy([
+            {"resource_id": "com.game:id/loading", "text": "Loading..."},
+        ])
+        detector = SlotGameDetector(None, "TestGame")
+        result = detector.detect(h)
+        assert result.phase == SlotPhase.LOADING
 
-    def test_detect_spin_button_no_cv2(self, detector, mock_screenshot):
-        with patch("crawlforge.detectors.slot_detector.CV2_AVAILABLE", False):
-            result = detector.detect_spin_button(mock_screenshot)
-            assert result is None
+    def test_detect_balance_low(self):
+        h = make_hierarchy([
+            {"resource_id": "com.game:id/spin_btn", "text": "SPIN", "clickable": True},
+            {"resource_id": "com.game:id/balance", "text": "Balance: 50"},
+        ])
+        detector = SlotGameDetector(None, "TestGame")
+        result = detector.detect(h)
+        assert result.balance == 50
+        assert result.balance_state == BalanceState.LOW
 
-    def test_detect_bonus_round_false(self, detector, mock_screenshot):
-        with patch("crawlforge.detectors.slot_detector.CV2_AVAILABLE", False):
-            result = detector.detect_bonus_round(mock_screenshot)
-            assert result is False
+    def test_detect_balance_empty(self):
+        h = make_hierarchy([
+            {"resource_id": "com.game:id/spin_btn", "text": "SPIN", "clickable": True},
+            {"resource_id": "com.game:id/balance", "text": "Balance: 0"},
+        ])
+        detector = SlotGameDetector(None, "TestGame")
+        result = detector.detect(h)
+        assert result.balance == 0
+        assert result.balance_state == BalanceState.EMPTY
 
-    def test_detect_phase_idle_state(self, detector, mock_screenshot):
-        """Test that low Laplacian variance returns IDLE."""
-        with patch("crawlforge.detectors.slot_detector.CV2_AVAILABLE", True):
-            with patch("cv2.imdecode", return_value=MagicMock()):
-                with patch("cv2.cvtColor", return_value=MagicMock()):
-                    with patch("cv2.Laplacian") as mock_lap:
-                        mock_result = MagicMock()
-                        mock_result.var.return_value = 50  # Low variance
-                        mock_lap.return_value = mock_result
-                        result = detector.detect_phase(mock_screenshot)
-                        assert result == GamePhase.IDLE
-
-    def test_match_template_not_found(self, detector, mock_screenshot):
-        """Test template match returns None when template not found."""
-        with patch("crawlforge.detectors.slot_detector.CV2_AVAILABLE", True):
-            with patch("cv2.imdecode", return_value=MagicMock()):
-                with patch("cv2.matchTemplate") as mock_match:
-                    mock_match.return_value = MagicMock()
-                    with patch("cv2.minMaxLoc") as mock_minmax:
-                        mock_minmax.return_value = (None, 0.5, None, (0, 0))
-                        result = detector.detect_spin_button(mock_screenshot)
-                        assert result is None
+    def test_detect_unknown(self):
+        h = make_hierarchy([])
+        detector = SlotGameDetector(None, "TestGame")
+        result = detector.detect(h)
+        assert result.phase == SlotPhase.UNKNOWN
+        assert result.confidence < 0.5

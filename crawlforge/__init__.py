@@ -1,46 +1,34 @@
 """
-CrawlForge - AI-Driven Multi-Game Crawler Framework
+CrawlForge - AI-Driven Slot Game Crawler Framework
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __author__ = "CrawlForge Team"
 
-# Import core components
-from .core.dataclasses import (
-    Action,
-    ActionType,
-    GameData,
-    GamePhase,
-    GameState,
-    SlotGameState,
-    Strategy,
+from .core import (
+    GameState, Action, GameData, ActionResult, DetectionResult, RuntimeType,
+    CrawlForgeError, AdapterError, DetectionError, ExecutionError,
+    TemplateMatchError, EvolutionError, RuntimeError, ConfigurationError,
+    Runtime, GameAdapter,
 )
-from .core.exceptions import (
-    AdapterError,
-    CrawlForgeError,
-    DetectionError,
-    EvolutionError,
-    RuntimeError,
+from .detector import (
+    SlotPhase, SpinState, BalanceState,
+    SlotGameDetector, SlotUI, SlotDetectionResult,
 )
-from .core.interfaces import GameAdapter, GameDetector, Runtime
+from .template_store import TemplateStore, Template, MatchResult, TemplateMatcher
+from .uiauto import UIAutoRuntime, UIElement, UIElementEncoder
 
 __all__ = [
-    # dataclasses
-    "Action",
-    "ActionType",
-    "GameData",
-    "GamePhase",
-    "GameState",
-    "SlotGameState",
-    "Strategy",
-    # exceptions
-    "CrawlForgeError",
-    "RuntimeError",
-    "AdapterError",
-    "EvolutionError",
-    "DetectionError",
-    # interfaces
-    "GameAdapter",
-    "GameDetector",
-    "Runtime",
+    # Core
+    "GameState", "Action", "GameData", "ActionResult", "DetectionResult",
+    "RuntimeType", "CrawlForgeError", "AdapterError", "DetectionError",
+    "ExecutionError", "TemplateMatchError", "EvolutionError",
+    "RuntimeError", "ConfigurationError", "Runtime", "GameAdapter",
+    # Detector
+    "SlotPhase", "SpinState", "BalanceState",
+    "SlotGameDetector", "SlotUI", "SlotDetectionResult",
+    # Template
+    "TemplateStore", "Template", "MatchResult", "TemplateMatcher",
+    # uIAuto
+    "UIAutoRuntime", "UIElement", "UIElementEncoder",
 ]

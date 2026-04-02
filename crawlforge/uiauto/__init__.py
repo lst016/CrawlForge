@@ -1,9 +1,8 @@
-"""CrawlForge uiauto module."""
+"""
+uIAuto module - Android UI automation via ADB + uiautomator2.
+"""
 
-from .uiauto_runtime import UIAutoRuntime
-from .template_store import TemplateStore
+from .runtime import UIAutoRuntime, UIElementEncoder
+from .ui_element import UIElement
 
-__all__ = [
-    "UIAutoRuntime",
-    "TemplateStore",
-]
+__all__ = ["UIAutoRuntime", "UIElement", "UIElementEncoder"]
