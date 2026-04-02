@@ -17,6 +17,8 @@ from .detector import (
 )
 from .template_store import TemplateStore, Template, MatchResult, TemplateMatcher
 from .uiauto import UIAutoRuntime, UIElement, UIElementEncoder
+from .ai_pipeline import AIPipeline, AIRouter, PipelineConfig, PipelineContext
+from .react import ReActLoop, ReActConfig, LoopResult
 
 __all__ = [
     # Core
@@ -31,4 +33,8 @@ __all__ = [
     "TemplateStore", "Template", "MatchResult", "TemplateMatcher",
     # uIAuto
     "UIAutoRuntime", "UIElement", "UIElementEncoder",
+    # AI Pipeline
+    "AIPipeline", "AIRouter", "PipelineConfig", "PipelineContext",
+    # ReAct
+    "ReActLoop", "ReActConfig", "LoopResult",
 ]
