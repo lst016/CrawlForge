@@ -12,6 +12,8 @@ dependencies = [
     "httpx>=0.25.0",
     "pydantic>=2.5.0",
     "opencv-python>=4.8.0",
+    "numpy>=1.24.0",
+    "pyyaml>=6.0",
     "uiautomator2>=2.12.0",
 ]
 
@@ -55,6 +57,7 @@ module = [
     "crawlforge/checkpoint/*",
     "crawlforge/adapter/base.py",
     "crawlforge/adapter/registry.py",
+    "crawlforge/template_matching/*",
 ]
 strict = false
 disallow_untyped_defs = true

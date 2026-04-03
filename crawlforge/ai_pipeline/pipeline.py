@@ -1,14 +1,10 @@
 """
 AI Pipeline - 4-stage pipeline for game automation.
-
-Stages:
-1. Analyze - Vision model reads screenshot
-2. Generate - LLM creates action plan
-3. Sandbox - Dry-run validation
-4. Test - Execute and verify
+统一使用 newapi 作为 AI 后端。
 """
 
 import asyncio
+import base64
 import hashlib
 import uuid
 from datetime import datetime
@@ -17,88 +13,112 @@ from typing import Optional
 from ..core import Action, GameState
 from ..core.interfaces import Runtime
 from .models import (
-    PipelineConfig, PipelineContext,
+    PipelineContext,
     AnalysisResult, ActionPlan, ActionStep, ActionType,
     SandboxResult, ValidatedStep, SandboxError, SandboxErrorType,
-    TestResult, ExecutedStep, UIElementResult, BoundingBox,
+    TestResult, ExecutedStep,
 )
+from .config import AIPipelineConfig
 
 
-class AIRouter:
-    """
-    AI Router - routes AI requests to configured backend.
-
-    Supports:
-    - Local airouter (http://localhost:18888)
-    - OpenAI-compatible APIs
-    - Anthropic APIs
-    """
-
-    def __init__(self, router_url: str = "http://localhost:18888"):
-        self.router_url = router_url
-
-    async def vision_analyze(
-        self,
-        screenshot: bytes,
-        prompt: str,
-        model: str = "qwen2.5-vl-3b",
-    ) -> str:
-        """Analyze screenshot with vision model."""
+class NewAPIClient:
+    """统一使用 newapi 的 AI 客户端"""
+    
+    def __init__(self, config: Optional[AIPipelineConfig] = None):
+        config = config or AIPipelineConfig()
+        self.url = config.newapi_url
+        self.key = config.newapi_key
+        self.vision_model = config.vision_model
+        self.chat_model = config.chat_model
+    
+    async def analyze_image(self, screenshot: bytes, prompt: str) -> str:
+        """使用 vision 模型分析图片"""
+        import httpx
+        b64 = base64.b64encode(screenshot).decode()
+        try:
+            async with httpx.AsyncClient(timeout=10.0, trust_env=False) as client:
+                resp = await client.post(
+                    f"{self.url}/chat/completions",
+                    headers={"Authorization": f"Bearer {self.key}"},
+                    json={
+                        "model": self.vision_model,
+                        "messages": [{
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt},
+                                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
+                            ]
+                        }],
+                        "max_tokens": 1024
+                    }
+                )
+                resp.raise_for_status()
+                return resp.json()["choices"][0]["message"]["content"]
+        except Exception:
+            return self._stub_vision_output(prompt)
+    
+    async def generate_text(self, messages: list[dict]) -> str:
+        """使用 chat 模型生成文字"""
         import httpx
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                b64 = __import__("base64").b64encode(screenshot).decode()
+            async with httpx.AsyncClient(timeout=10.0, trust_env=False) as client:
                 resp = await client.post(
-                    f"{self.router_url}/v1/chat/completions",
+                    f"{self.url}/chat/completions",
+                    headers={"Authorization": f"Bearer {self.key}"},
                     json={
-                        "model": model,
-                        "messages": [
-                            {
-                                "role": "user",
-                                "content": [
-                                    {"type": "text", "text": prompt},
-                                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
-                                ],
-                            }
-                        ],
-                        "max_tokens": 1024,
-                    },
+                        "model": self.chat_model,
+                        "messages": messages,
+                        "max_tokens": 2048
+                    }
                 )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    return data["choices"][0]["message"]["content"]
+                resp.raise_for_status()
+                return resp.json()["choices"][0]["message"]["content"]
         except Exception:
-            pass
-        return self._stub_vision_output(prompt)
-
-    async def llm_generate(
-        self,
-        prompt: str,
-        model: str = "qwen3.5-27b",
-    ) -> str:
-        """Generate text with LLM."""
-        import httpx
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(
-                    f"{self.router_url}/v1/chat/completions",
-                    json={
-                        "model": model,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "max_tokens": 512,
-                    },
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    return data["choices"][0]["message"]["content"]
-        except Exception:
-            pass
-        return self._stub_llm_output(prompt)
+            return self._stub_llm_output(messages[-1]["content"] if messages else "")
 
     @staticmethod
     def _stub_vision_output(prompt: str) -> str:
         return f"Vision analysis: detected spin button at center, balance display at top. {prompt}"
+    
+    @staticmethod
+    def _stub_llm_output(prompt: str) -> str:
+        return f"Action plan: tap center of screen to spin. Reasoning: standard slot game flow."
 
+
+class AIRouter:
+    """Backward-compat wrapper - now uses newapi internally."""
+    
+    def __init__(self, router_url: str = "http://localhost:18888"):
+        # router_url is ignored, uses newapi config
+        self._config = AIPipelineConfig()
+        self._client = NewAPIClient(self._config)
+    
+    async def vision_analyze(self, screenshot: bytes, prompt: str, model: str = "qwen2.5-vl-3b") -> str:
+        """Backward compat: delegate to client."""
+        # Override vision model if provided
+        old_model = self._client.vision_model
+        if model and model != "qwen2.5-vl-3b":
+            self._client.vision_model = model
+        try:
+            return await self._client.analyze_image(screenshot, prompt)
+        finally:
+            self._client.vision_model = old_model
+    
+    async def llm_generate(self, prompt: str, model: str = "qwen3.5-27b") -> str:
+        """Backward compat: delegate to client."""
+        old_model = self._client.chat_model
+        if model and model != "qwen3.5-27b":
+            self._client.chat_model = model
+        try:
+            messages = [{"role": "user", "content": prompt}]
+            return await self._client.generate_text(messages)
+        finally:
+            self._client.chat_model = old_model
+    
+    @staticmethod
+    def _stub_vision_output(prompt: str) -> str:
+        return f"Vision analysis: detected spin button at center, balance display at top. {prompt}"
+    
     @staticmethod
     def _stub_llm_output(prompt: str) -> str:
         return f"Action plan: tap center of screen to spin. Reasoning: standard slot game flow."
@@ -107,60 +127,43 @@ class AIRouter:
 class AIPipeline:
     """
     4-stage AI pipeline for game automation.
-
-    Usage:
-        pipeline = AIPipeline(config, runtime)
-        context = PipelineContext(goal="spin the reels", screenshot=bytes)
-        plan = await pipeline.run(context)
+    
+    Stages:
+    1. Analyze - Vision model reads screenshot
+    2. Generate - LLM creates action plan
+    3. Sandbox - Dry-run validation
+    4. Test - Execute and verify
     """
-
+    
     def __init__(
         self,
-        config: PipelineConfig,
-        runtime: Runtime,
-        router: Optional[AIRouter] = None,
+        config: Optional[AIPipelineConfig] = None,
+        runtime: Optional[Runtime] = None,
     ):
-        self.config = config
+        self.config = config or AIPipelineConfig()
         self.runtime = runtime
-        self.router = router or AIRouter()
-
-    async def run(self, context: PipelineContext) -> ActionPlan:
-        """
-        Run full pipeline: Analyze → Generate → Sandbox → Test.
-
-        Returns a validated ActionPlan ready for execution.
-        """
-        # Stage 1: Analyze
-        analysis = await self.analyze(context.screenshot, context.goal)
-
-        # Stage 2: Generate
-        plan = await self.generate(analysis, context.goal)
-
-        # Stage 3: Sandbox (optional)
-        if self.config.sandbox_enabled:
-            sandbox_result = self.sandbox(plan)
-            if not sandbox_result.is_valid:
-                # Filter to only valid steps
-                plan.steps = [
-                    s.step for s in sandbox_result.validated_steps
-                    if s.status in ("valid", "warning")
-                ]
-
-        return plan
-
+        self.client = NewAPIClient(self.config)
+    
     async def analyze(self, screenshot: bytes, prompt: Optional[str] = None) -> AnalysisResult:
-        """
-        Stage 1: Vision analysis of screenshot.
-
-        Uses vision model to detect UI elements and game state.
-        """
+        """阶段1: 分析截图"""
         prompt = prompt or "Analyze this slot game screenshot. Identify: spin button location, balance, bet level, any active bonuses or free spins."
-        raw = await self.router.vision_analyze(screenshot, prompt, self.config.vision_model)
-
-        # Parse vision output
-        elements, balance, spin_visible = self._parse_vision_output(raw)
-
+        raw = await self.client.analyze_image(screenshot, prompt)
+        
         screenshot_hash = hashlib.sha256(screenshot).hexdigest()
+        # Parse simple output
+        elements = []
+        balance = None
+        spin_visible = True
+        
+        import re
+        if "balance" in raw.lower():
+            match = re.search(r"balance[:\s]*(\d+)", raw, re.IGNORECASE)
+            if match:
+                balance = float(match.group(1))
+        
+        spin_keywords = ["spin button", "spin", "play button"]
+        spin_visible = any(k in raw.lower() for k in spin_keywords)
+        
         return AnalysisResult(
             screenshot_hash=screenshot_hash,
             timestamp=datetime.now(),
@@ -171,19 +174,18 @@ class AIPipeline:
             raw_vision_output=raw,
             suggestions=["tap_spin" if spin_visible else "wait"],
         )
-
+    
     async def generate(self, analysis: AnalysisResult, goal: str) -> ActionPlan:
-        """
-        Stage 2: Generate action plan from analysis.
-
-        Uses LLM to create a structured plan.
-        """
-        prompt = self._build_generation_prompt(analysis, goal)
-        raw = await self.router.llm_generate(prompt, self.config.llm_model)
-
+        """阶段2: 生成 action plan"""
+        messages = [
+            {"role": "system", "content": "你是一个游戏自动化助手。根据截图分析生成下一步操作计划。"},
+            {"role": "user", "content": f"分析结果: {analysis.raw_vision_output}\n目标: {goal}\n请生成具体操作步骤。"}
+        ]
+        raw = await self.client.generate_text(messages)
+        
         plan_id = str(uuid.uuid4())[:8]
         plan = self._parse_plan_output(raw, plan_id, goal)
-
+        
         if not plan.steps:
             # Fallback: basic spin action
             plan.steps.append(ActionStep(
@@ -193,34 +195,28 @@ class AIPipeline:
                 description="Tap spin button",
                 expected_outcome="Reels start spinning",
             ))
-
         return plan
-
+    
     def sandbox(self, plan: ActionPlan) -> SandboxResult:
-        """
-        Stage 3: Sandbox validation.
-
-        Dry-run validation of the action plan to catch errors.
-        """
+        """阶段3: 沙盒验证"""
         validated = []
         errors = []
         warnings = []
-
-        screen_w, screen_h = 1080, 2340  # Typical Android dimensions
-
+        
+        screen_w, screen_h = 1080, 2340
+        
         for i, step in enumerate(plan.steps):
             step_num = i + 1
             issues = []
-
+            
             at = step.action_type
             p = step.params
-
-            # Check coordinates are in bounds
-            if at in (ActionType.TAP,):
+            
+            if at in (ActionType.TAP, ActionType.CLICK):
                 x, y = p.get("x", 0), p.get("y", 0)
                 if x < 0 or x > screen_w or y < 0 or y > screen_h:
                     issues.append(f"Step {step_num}: coordinates ({x},{y}) out of bounds")
-
+            
             elif at == ActionType.SWIPE:
                 x1, y1 = p.get("x1", 0), p.get("y1", 0)
                 x2, y2 = p.get("x2", 0), p.get("y2", 0)
@@ -228,13 +224,12 @@ class AIPipeline:
                     cx, cy = coords
                     if cx < 0 or cx > screen_w or cy < 0 or cy > screen_h:
                         issues.append(f"Step {step_num}: {name} coords ({cx},{cy}) out of bounds")
-
+            
             elif at == ActionType.WAIT:
                 duration = p.get("duration_ms", 0)
                 if duration > 30000:
                     warnings.append(f"Step {step_num}: unusually long wait ({duration}ms)")
-
-            # Classify status
+            
             if issues:
                 for msg in issues:
                     errors.append(SandboxError(
@@ -247,22 +242,29 @@ class AIPipeline:
                 validated.append(ValidatedStep(step=step, status="warning", reason=warnings[-1]))
             else:
                 validated.append(ValidatedStep(step=step, status="valid"))
-
+        
         return SandboxResult(
             is_valid=len(errors) == 0,
             validated_steps=validated,
             errors=errors,
             warnings=warnings,
         )
-
+    
     async def test(self, plan: ActionPlan) -> TestResult:
-        """
-        Stage 4: Execute plan and verify result.
-        """
+        """阶段4: 执行测试"""
+        if self.runtime is None:
+            # Mock execution when no runtime
+            executed = [
+                ExecutedStep(step=s, status="success", duration_ms=100)
+                for s in plan.steps
+            ]
+            return TestResult(
+                plan_id=plan.plan_id if hasattr(plan, 'plan_id') else "",
+                executed_steps=executed,
+                success=True,
+            )
+        
         executed = []
-        unexpected = []
-        retry = False
-
         for step in plan.steps:
             try:
                 action = self._step_to_action(step)
@@ -274,71 +276,39 @@ class AIPipeline:
                     error=result.error,
                     duration_ms=result.duration_ms,
                 ))
-                if not result.success:
-                    retry = True
             except Exception as e:
                 executed.append(ExecutedStep(
                     step=step,
                     status="failed",
                     error=str(e),
                 ))
-                retry = True
-
-        final_screen = await self.runtime.screenshot() if self.runtime.is_alive() else None
+        
         return TestResult(
             plan_id=plan.plan_id if hasattr(plan, 'plan_id') else "",
             executed_steps=executed,
             success=all(s.status == "success" for s in executed),
-            final_screenshot=final_screen,
-            unexpected_states=unexpected,
-            retry_recommended=retry,
         )
-
-    def _parse_vision_output(self, raw: str) -> tuple:
-        """Parse vision model output into structured data."""
-        elements = []
-        balance = None
-        spin_visible = True  # Assume visible unless detected otherwise
-
-        # Simple heuristics for now
-        if "balance" in raw.lower():
-            import re
-            match = re.search(r"balance[:\s]*(\d+)", raw, re.IGNORECASE)
-            if match:
-                balance = float(match.group(1))
-
-        # Check for spin button mention
-        spin_keywords = ["spin button", "spin", "play button"]
-        spin_visible = any(k in raw.lower() for k in spin_keywords)
-
-        return elements, balance, spin_visible
-
-    def _build_generation_prompt(self, analysis: AnalysisResult, goal: str) -> str:
-        """Build prompt for LLM plan generation."""
-        state = analysis.game_state_dict
-        return f"""Generate an action plan for a slot game.
-
-Goal: {goal}
-Game state: {state}
-
-Respond with a JSON action plan:
-{{"plan_id": "uuid", "steps": [
-  {{"step_number": 1, "action_type": "tap", "params": {{"x": 540, "y": 2050}}, "description": "tap spin"}}
-]}}
-
-Available action types: tap, swipe, wait, collect_bonus, set_bet
-For tap: params must include x, y coordinates
-For swipe: params must include x1, y1, x2, y2, duration_ms
-For wait: params must include duration_ms
-
-Respond ONLY with valid JSON, no explanation."""
-
+    
+    async def run(self, context: PipelineContext) -> ActionPlan:
+        """完整流程: analyze → generate → sandbox → test"""
+        analysis = await self.analyze(context.screenshot, context.goal)
+        plan = await self.generate(analysis, context.goal)
+        
+        if self.config.sandbox_enabled:
+            sandbox = self.sandbox(plan)
+            if not sandbox.is_valid:
+                plan.steps = [
+                    s.step for s in sandbox.validated_steps
+                    if s.status in ("valid", "warning")
+                ]
+        
+        return plan
+    
     def _parse_plan_output(self, raw: str, plan_id: str, goal: str) -> ActionPlan:
         """Parse LLM output into ActionPlan."""
         import json
         import re
-
-        # Try to extract JSON from response
+        
         match = re.search(r"\{[\s\S]*\}", raw)
         if match:
             try:
@@ -366,16 +336,15 @@ Respond ONLY with valid JSON, no explanation."""
                 )
             except (json.JSONDecodeError, KeyError):
                 pass
-
-        # Fallback
+        
         return ActionPlan(plan_id=plan_id, goal=goal, steps=[])
-
+    
     @staticmethod
     def _step_to_action(step: ActionStep) -> Action:
         """Convert ActionStep to runtime Action."""
         at = step.action_type
         p = step.params
-        if at == ActionType.TAP:
+        if at in (ActionType.TAP, ActionType.CLICK):
             return Action(action_type="tap", x=p.get("x"), y=p.get("y"))
         elif at == ActionType.SWIPE:
             return Action(

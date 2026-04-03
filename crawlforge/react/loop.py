@@ -14,7 +14,8 @@ from typing import Optional, Any
 
 from ..core import Action, GameState
 from ..core.interfaces import Runtime
-from ..ai_pipeline import AIPipeline, AnalysisResult, ActionPlan, TestResult
+from ..ai_pipeline import AIPipeline, AIPipelineConfig, AnalysisResult, ActionPlan, TestResult
+from ..evolution.fixer import AdapterFixer, FixResult
 from .models import (
     ReActStep, ReActConfig, ReActState,
     ObservationResult, ExecutionResult, ReflectionResult,
@@ -35,18 +36,21 @@ class ReActLoop:
 
     def __init__(
         self,
-        runtime: Runtime,
-        pipeline: AIPipeline,
+        runtime: Optional[Runtime] = None,
+        pipeline: Optional[AIPipeline] = None,
         config: Optional[ReActConfig] = None,
         checkpoint_manager: Optional[Any] = None,
+        game_adapter: Optional[Any] = None,
     ):
         self.runtime = runtime
-        self.pipeline = pipeline
+        self.pipeline = pipeline or AIPipeline(AIPipelineConfig())
         self.config = config or ReActConfig()
         self.checkpoint_manager = checkpoint_manager
+        self.game_adapter = game_adapter
         self._history: list[ReActStep] = []
         self._is_running = False
         self._current_state: Optional[ReActState] = None
+        self._fixer = AdapterFixer() if game_adapter else None
 
     async def run(self, goal: str, max_iterations: int = 50) -> LoopResult:
         """
@@ -139,7 +143,10 @@ class ReActLoop:
 
     async def observe(self) -> ObservationResult:
         """OBSERVE: Capture screenshot and analyze game state."""
-        screenshot = await self.runtime.screenshot()
+        if self.runtime:
+            screenshot = await self.runtime.screenshot()
+        else:
+            screenshot = b"fake_screenshot"
         screenshot_hash = hashlib.sha256(screenshot).hexdigest()
 
         # Run AI analysis
@@ -164,11 +171,27 @@ class ReActLoop:
         return plan
 
     async def act(self, plan: ActionPlan) -> ExecutionResult:
-        """ACT: Execute action plan via runtime."""
-        test_result = await self.pipeline.test(plan)
+        """ACT: Execute action plan via runtime with self-healing."""
+        try:
+            test_result = await self.pipeline.test(plan)
+        except Exception as e:
+            # Evolution self-healing: try to fix with AdapterFixer
+            if self._fixer and self.game_adapter:
+                fix_result = self._fix_with_evolution(e, plan)
+                if fix_result.success:
+                    # Retry with fixed plan
+                    test_result = await self.pipeline.test(fix_result.fixed_plan)
+                else:
+                    raise
+            else:
+                raise
 
         # Get balance after
-        new_screenshot = await self.runtime.screenshot()
+        if self.runtime:
+            new_screenshot = await self.runtime.screenshot()
+        else:
+            new_screenshot = b"fake_screenshot"
+        
         analysis = await self.pipeline.analyze(new_screenshot)
         balance_after = analysis.balance
 
@@ -188,6 +211,35 @@ class ReActLoop:
             state_changed=state_changed,
             runtime_errors=[s.error for s in test_result.executed_steps if s.error],
         )
+
+    def _fix_with_evolution(self, error: Exception, plan: ActionPlan) -> FixResult:
+        """Use AdapterFixer to attempt auto-repair."""
+        if not self._fixer:
+            return FixResult(success=False, error_id="", fix_applied="")
+        
+        # Record the error
+        from ..evolution.fixer import ErrorType
+        error_id = self._fixer.record_error(
+            error_type=ErrorType.ACTION_FAILURE,
+            error_message=str(error),
+            adapter_name=getattr(self.game_adapter, 'game_name', 'unknown'),
+            context={"plan_id": plan.plan_id},
+            exception=error,
+        )
+        
+        # Analyze and apply fix
+        suggestions = self._fixer.analyze(error_id)
+        if suggestions:
+            result = self._fixer.apply_fix(error_id, suggestions[0], self.game_adapter)
+            if result.success:
+                return FixResult(
+                    success=True,
+                    error_id=error_id,
+                    fix_applied=result.fix_applied,
+                    fixed_plan=plan,  # Use same plan after config changes
+                )
+        
+        return FixResult(success=False, error_id=error_id, fix_applied="")
 
     async def reflect(self, execution: ExecutionResult, goal: str) -> ReflectionResult:
         """REFLECT: Evaluate execution result."""

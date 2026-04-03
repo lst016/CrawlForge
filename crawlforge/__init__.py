@@ -20,7 +20,7 @@ from .detector import (
 )
 from .template_store import TemplateStore, Template, MatchResult, TemplateMatcher
 from .uiauto import UIAutoRuntime, UIElement, UIElementEncoder
-from .ai_pipeline import AIPipeline, AIRouter, PipelineConfig, PipelineContext
+from .ai_pipeline import AIPipeline, AIPipelineConfig, NewAPIClient, AIRouter, PipelineContext
 from .react import ReActLoop, ReActConfig, LoopResult
 
 # Adapter module
@@ -121,7 +121,7 @@ __all__ = [
     # UIAuto
     "UIAutoRuntime", "UIElement", "UIElementEncoder",
     # AI Pipeline
-    "AIPipeline", "AIRouter", "PipelineConfig", "PipelineContext",
+    "AIPipeline", "AIPipelineConfig", "NewAPIClient", "AIRouter", "PipelineContext",
     # ReAct
     "ReActLoop", "ReActConfig", "LoopResult",
     # Adapters

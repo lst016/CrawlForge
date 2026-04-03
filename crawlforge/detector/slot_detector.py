@@ -341,3 +341,112 @@ class SlotGameDetector:
         if "no_spin_button" in hints:
             confidence -= 0.1
         return min(1.0, max(0.0, confidence))
+
+    def detect_game_type(self, root: UIElement) -> str:
+        """
+        Detect the type of slot game based on UI structure.
+        
+        Returns one of: "classic_3reel", "video_5reel", "jackpot", "megaways", "bonus_slot", "unknown"
+        """
+        game_type_hints = {
+            "classic_3reel": 0,
+            "video_5reel": 0,
+            "jackpot": 0,
+            "megaways": 0,
+            "bonus_slot": 0,
+        }
+        
+        all_text = " ".join([el.text or "" for el in root.find_all() if hasattr(root, 'find_all')])
+        all_text_lower = all_text.lower()
+        
+        # Jackpot detection
+        jackpot_keywords = ["jackpot", "progressive", "grand", "major", "minor", "mini"]
+        for kw in jackpot_keywords:
+            if kw in all_text_lower:
+                game_type_hints["jackpot"] += 1
+        
+        # Megaways detection
+        megaways_keywords = ["megaways", "megaways", "ways", "117649", "20000"]
+        for kw in megaways_keywords:
+            if kw in all_text_lower:
+                game_type_hints["megaways"] += 1
+        
+        # Bonus slot detection
+        bonus_keywords = ["bonus", "free spin", "scatter", "wild", "multiplier"]
+        for kw in bonus_keywords:
+            if kw in all_text_lower:
+                game_type_hints["bonus_slot"] += 1
+        
+        # Classic vs video detection (heuristic based on UI complexity)
+        button_count = len([el for el in root.find_all() if hasattr(root, 'find_all') and el.clickable])
+        if button_count <= 5:
+            game_type_hints["classic_3reel"] += 2
+        elif button_count >= 8:
+            game_type_hints["video_5reel"] += 2
+        
+        # Find the type with highest score
+        best_type = max(game_type_hints, key=game_type_hints.get)
+        if game_type_hints[best_type] == 0:
+            return "unknown"
+        return best_type
+
+    def detect_bonus_round(self, root: UIElement) -> bool:
+        """
+        Detect if a bonus round is currently active.
+        
+        Bonus rounds include: free spins, pick-a-prize, wheel spins, etc.
+        """
+        # Check for free spin counter
+        free_spin_el = self._find_element_by_ids(root, self.FREE_SPIN_IDS)
+        if free_spin_el:
+            count = self._extract_number(free_spin_el.text)
+            if count and count > 0:
+                return True
+        
+        # Check for bonus game indicators
+        bonus_phrases = [
+            "bonus game", "free spins", "free games", 
+            "pick a", "select", "wheel spin", "spin the wheel",
+            "gamble", "double up", "risk game"
+        ]
+        
+        for el in root.find_all() if hasattr(root, 'find_all') else []:
+            text_lower = (el.text or "").lower()
+            desc_lower = (el.content_desc or "").lower()
+            for phrase in bonus_phrases:
+                if phrase in text_lower or phrase in desc_lower:
+                    return True
+        
+        return False
+
+    def validate_state_transition(self, from_phase: SlotPhase, to_phase: SlotPhase) -> bool:
+        """
+        Validate if a state transition is valid.
+        
+        Args:
+            from_phase: Previous game phase
+            to_phase: New game phase
+            
+        Returns:
+            True if transition is valid, False otherwise
+        """
+        # Define valid transitions
+        valid_transitions = {
+            SlotPhase.LOADING: {SlotPhase.TITLE_SCREEN, SlotPhase.MAIN_LOBBY, SlotPhase.GAME_READY},
+            SlotPhase.TITLE_SCREEN: {SlotPhase.MAIN_LOBBY, SlotPhase.GAME_READY, SlotPhase.LOADING},
+            SlotPhase.MAIN_LOBBY: {SlotPhase.GAME_READY, SlotPhase.SETTINGS},
+            SlotPhase.GAME_READY: {
+                SlotPhase.SPINNING, SlotPhase.WIN_DISPLAY, SlotPhase.FREE_SPINS,
+                SlotPhase.BONUS_GAME, SlotPhase.SETTINGS, SlotPhase.MAIN_LOBBY
+            },
+            SlotPhase.SPINNING: {SlotPhase.WIN_DISPLAY, SlotPhase.FREE_SPINS, SlotPhase.BONUS_GAME, SlotPhase.GAME_READY},
+            SlotPhase.WIN_DISPLAY: {SlotPhase.GAME_READY, SlotPhase.FREE_SPINS, SlotPhase.BONUS_GAME},
+            SlotPhase.FREE_SPINS: {SlotPhase.FREE_SPINS, SlotPhase.WIN_DISPLAY, SlotPhase.GAME_READY, SlotPhase.BONUS_GAME},
+            SlotPhase.BONUS_GAME: {SlotPhase.BONUS_GAME, SlotPhase.WIN_DISPLAY, SlotPhase.GAME_READY},
+            SlotPhase.SETTINGS: {SlotPhase.GAME_READY, SlotPhase.MAIN_LOBBY},
+            SlotPhase.CONNECTION_ERROR: {SlotPhase.LOADING, SlotPhase.TITLE_SCREEN},
+            SlotPhase.UNKNOWN: set(SlotPhase),  # Can go anywhere from unknown
+        }
+        
+        allowed = valid_transitions.get(from_phase, set())
+        return to_phase in allowed
