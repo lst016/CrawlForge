@@ -162,7 +162,7 @@ class ReActLoop:
         """THINK: Generate action plan from observation."""
         # Generate plan from analysis
         plan = await self.pipeline.generate(observation.analysis, goal)
-        # Run sandbox validation
+        # Run sandbox validation (sandbox() is synchronous)
         if self.pipeline.config.sandbox_enabled:
             sandbox = self.pipeline.sandbox(plan)
             if not sandbox.is_valid:

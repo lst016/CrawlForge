@@ -5,6 +5,7 @@ Provides UI hierarchy access, element finding, and action execution.
 """
 
 import asyncio
+import os
 import subprocess
 import xml.etree.ElementTree as ET
 from typing import Optional, Union
@@ -99,14 +100,20 @@ class UIAutoRuntime(Runtime):
     - Template screenshot matching via OpenCV
     """
 
-    def __init__(self, device_id: Optional[str] = None, serial: Optional[str] = None):
+    def __init__(
+        self,
+        device_id: Optional[str] = None,
+        serial: Optional[str] = None,
+        adb_path: Optional[str] = None,
+    ):
         """
         Args:
             device_id: ADB device serial. Uses first device if None.
             serial: Alias for device_id.
+            adb_path: Path to adb binary. Default: env ADB_PATH or "adb".
         """
         self.device_id = serial or device_id
-        self._adb_path = "adb"
+        self._adb_path = adb_path or os.environ.get("ADB_PATH", "adb")
         self._current_hierarchy: Optional[UIElement] = None
         self._screen_cache: Optional[bytes] = None
 
