@@ -6,7 +6,7 @@ authors = [
     {name = "CrawlForge Team"}
 ]
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 dependencies = [
     "playwright>=1.40.0",
     "httpx>=0.25.0",
@@ -20,7 +20,11 @@ dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
     "ruff>=0.1.0",
+    "mypy>=1.0.0",
 ]
+
+[project.scripts]
+crawlforge = "crawlforge.cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -36,3 +40,21 @@ target-version = "py311"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.9"
+ignore_missing_imports = true
+warn_unused_ignores = true
+show_error_codes = true
+no_implicit_optional = false
+
+# Core modules with stricter type checking
+[[tool.mypy.overrides]]
+module = [
+    "crawlforge/core/*",
+    "crawlforge/checkpoint/*",
+    "crawlforge/adapter/base.py",
+    "crawlforge/adapter/registry.py",
+]
+strict = false
+disallow_untyped_defs = true

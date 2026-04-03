@@ -1,0 +1,113 @@
+# Game Adapter Configurations
+# Each entry defines a game and its adapter configuration
+
+games:
+  # --- Slot Games ---
+  - name: GenericSlot
+    adapter: SlotGameAdapter
+    type: slot
+    description: Generic slot game adapter
+    config:
+      confidence_threshold: 0.7
+      default_bet: 100
+      max_bet: 10000
+      auto_collect: true
+      screenshot_interval_ms: 200
+      action_cooldown_ms: 300
+
+  - name: FruitSlot
+    adapter: SlotGameAdapter
+    type: slot
+    description: Fruit-themed slot game
+    config:
+      confidence_threshold: 0.75
+      default_bet: 50
+      max_bet: 5000
+      auto_collect: true
+      action_cooldown_ms: 400
+
+  - name: ProgressiveJackpot
+    adapter: SlotGameAdapter
+    type: slot
+    description: Progressive jackpot slot
+    config:
+      confidence_threshold: 0.8
+      default_bet: 200
+      max_bet: 20000
+      auto_collect: true
+      screenshot_interval_ms: 150
+
+  # --- Card Games ---
+  - name: VideoPoker
+    adapter: PokerGameAdapter
+    type: card
+    description: Video poker game
+    config:
+      confidence_threshold: 0.8
+      default_bet: 25
+      max_bet: 500
+      auto_collect: true
+
+  - name: Blackjack
+    adapter: BlackjackAdapter
+    type: card
+    description: Blackjack game
+    config:
+      confidence_threshold: 0.85
+      default_bet: 100
+      max_bet: 5000
+      auto_collect: false
+
+  # --- Arcade Games ---
+  - name: ArcadeGame
+    adapter: ArcadeGameAdapter
+    type: arcade
+    description: Generic arcade game
+    config:
+      confidence_threshold: 0.6
+      auto_collect: false
+      action_cooldown_ms: 200
+
+# Adapter metadata
+adapters:
+  SlotGameAdapter:
+    game_type: slot
+    version: "1.0"
+    capabilities:
+      - auto_spin
+      - bet_adjust
+      - collect
+      - free_spin
+      - bonus_trigger
+    supported_phases:
+      - idle
+      - spinning
+      - win
+      - bonus
+      - free_spin
+      - collecting
+
+  PokerGameAdapter:
+    game_type: card
+    version: "1.0"
+    capabilities:
+      - hold_discard
+      - bet_adjust
+      - collect
+    supported_phases:
+      - dealt
+      - holding
+      - drawing
+      - win
+      - lose
+
+  ArcadeGameAdapter:
+    game_type: arcade
+    version: "1.0"
+    capabilities:
+      - navigate
+      - interact
+    supported_phases:
+      - playing
+      - paused
+      - game_over
